@@ -16,6 +16,8 @@ import { companyPresentation, companySearchText } from "@/lib/company-presentati
 import { sortRows } from "@/lib/core/pipeline-sort.mjs";
 
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
+// ALL is labelled ACTIVE and leaves out roles you skipped or discarded — they
+// keep their own tabs, so nothing is lost, it just stops crowding the list.
 const TABS = [
   "INBOX",
   "ALL",
@@ -102,7 +104,8 @@ export function PipelineView({
   const filtered = useMemo(() => {
     if (tab === "INBOX") return [];
     let rows = visibleApplications;
-    if (tab !== "ALL") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
+    if (tab === "ALL") rows = rows.filter(isActive);
+    else rows = rows.filter((r) => canonStatus(r.status).includes(tab));
     if (minFilter != null) {
       rows = rows.filter((r) => {
         const n = scoreNum(r.score);
@@ -154,7 +157,7 @@ export function PipelineView({
             t === "INBOX"
               ? pendingInbox.length
               : t === "ALL"
-                ? visibleApplications.length
+                ? visibleApplications.filter(isActive).length
                 : visibleApplications.filter((r) => canonStatus(r.status).includes(t)).length;
           return (
             <button
@@ -170,7 +173,7 @@ export function PipelineView({
                   : "border-transparent text-muted hover:text-foreground",
               )}
             >
-              {t} <span className="text-faint tabular-nums">{count}</span>
+              {t === "ALL" ? "ACTIVE" : t} <span className="text-faint tabular-nums">{count}</span>
             </button>
           );
         })}
@@ -264,7 +267,7 @@ export function PipelineView({
                         // If this focused row leaves its tab, preserve a useful
                         // focus target. Do not interrupt someone using search.
                         const focusedRow = document.activeElement?.closest("tr");
-                        if (tab !== "ALL" && !canonStatus(status).includes(tab) && (restoreFocus || focusedRow?.dataset.applicationKey === key)) {
+                        if ((tab === "ALL" ? !isActive({ status }) : !canonStatus(status).includes(tab)) && (restoreFocus || focusedRow?.dataset.applicationKey === key)) {
                           activeTab.current?.focus();
                         }
                         setAnnouncement(`Application #${r.n} status saved as ${status}.`);
@@ -290,6 +293,11 @@ export function PipelineView({
       )}
     </div>
   );
+}
+
+function isActive(r: { status: string }): boolean {
+  const c = canonStatus(r.status);
+  return !c.includes("DISCARDED") && !c.includes("SKIP");
 }
 
 // Empty inbox. Self-sufficient for the mainstream user (a primary in-web action),

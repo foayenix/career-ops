@@ -1044,6 +1044,11 @@ process_offer() {
   local -a claude_args=(-p --dangerously-skip-permissions --strict-mcp-config)
   if [[ -n "$RESOLVED_MODEL" ]]; then
     claude_args+=(--model "$RESOLVED_MODEL")
+    # Opus evaluations run at medium effort: high effort costs far more per
+    # offer without a matching gain in A-H report quality.
+    case "$RESOLVED_MODEL" in
+      claude-opus-*) claude_args+=(--effort medium) ;;
+    esac
   fi
   claude_args+=(--append-system-prompt-file "$resolved_prompt" "$prompt")
 

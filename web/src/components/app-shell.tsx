@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect } from "react";
+import { persistCliId, pickDefaultInstalled, readSavedCliId } from "@/lib/saved-cli";
 import { cn } from "@/lib/cn";
 import { CoMark } from "@/components/co-mark";
 import { AssistantConsole } from "@/components/assistant-console";
@@ -18,9 +20,24 @@ import { WorkerPills } from "@/components/jobs/worker-pills";
 import { UsageMeter } from "@/components/usage-meter";
 import { instrumentSerif } from "@/lib/fonts";
 import { NAV_ITEMS, isActivePath } from "@/lib/nav-items";
+import { ReviewNavCount } from "@/components/review/review-nav-count";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  // Every AI surface (Evaluate, Apply pre-fill, the agent) reads the CLI saved in
+  // this browser, and only the Config page used to save one. Save the default
+  // installed CLI on first load instead, the same pick Config makes, so a fresh
+  // browser works without a trip to Config. A choice already saved is kept.
+  useEffect(() => {
+    if (readSavedCliId()) return;
+    fetch("/api/clis")
+      .then((r) => r.json())
+      .then((d) => {
+        const id = pickDefaultInstalled(d?.clis ?? []);
+        if (id && !readSavedCliId()) persistCliId(id);
+      })
+      .catch(() => {});
+  }, []);
   return (
     <JobsProvider>
       <PipelineProvider>
@@ -32,11 +49,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Link href="/" className="mb-8 flex items-center gap-2.5 px-1">
             <CoMark size={32} />
             <span className={`${instrumentSerif.className} relative -top-px text-2xl font-normal tracking-tight text-landing`}>
-              career-ops
+              felixjobs
             </span>
           </Link>
           <nav className="flex flex-col gap-1">
-            {NAV_ITEMS.map(({ href, label, icon: Icon, chip }) => {
+            {NAV_ITEMS.map(({ href, label, icon: Icon, chip, count }) => {
               const active = isActivePath(href, pathname);
               return (
                 <Link
@@ -51,6 +68,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 >
                   <Icon className="size-4" />
                   {label}
+                  {count === "review" && <ReviewNavCount />}
                   {chip && (
                     <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-text">
                       {chip}
@@ -77,7 +95,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </aside>
-        <main className="flex-1 overflow-x-hidden">{children}</main>
+        {/* overflow-x-clip, not -hidden: hidden makes <main> a scroll container,
+            which silently breaks position:sticky for everything inside it. */}
+        <main className="min-w-0 flex-1 overflow-x-clip">{children}</main>
         <AssistantConsole />
         <BackToTop />
         <FirstScoreView />

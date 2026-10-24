@@ -1,4 +1,4 @@
-import { LayoutDashboard, Compass, ListChecks, Send, Radar, BarChart3, FileText, Settings, CalendarClock } from "lucide-react";
+import { LayoutDashboard, ClipboardCheck, Compass, ListChecks, Send, Radar, BarChart3, FileText, Settings, CalendarClock } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 
 // Single source of truth for the app's primary destinations — shared by the
@@ -8,10 +8,13 @@ export type NavItem = {
   label: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
   chip?: string;
+  /** Live count rendered beside the label (see ReviewNavCount). */
+  count?: "review";
 };
 
 export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Today", icon: LayoutDashboard },
+  { href: "/review", label: "Review", icon: ClipboardCheck, count: "review" },
   { href: "/explore", label: "Explore", icon: Compass, chip: "New" },
   { href: "/scheduled-scans", label: "Scheduled scans", icon: CalendarClock },
   { href: "/pipeline", label: "Pipeline", icon: ListChecks },

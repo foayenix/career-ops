@@ -7,7 +7,7 @@ import { resolveLateSession } from "@/lib/apply/exit.mjs";
 
 export type FillStep = { fieldId: string; label: string; ok: boolean; thumb?: string };
 type Meta = { needsConfirmation?: boolean };
-type Status = "idle" | "opening" | "driving" | "prefilling" | "ready" | "filling" | "done" | "error";
+type Status = "idle" | "opening" | "login" | "driving" | "prefilling" | "ready" | "filling" | "done" | "error";
 
 type ApplyCtx = {
   status: Status;
@@ -27,11 +27,16 @@ type ApplyCtx = {
   issues: ApplyIssue[];
   driveSteps: DriveStep[];
   error: string;
+  /** Instructions shown while the user signs in on the on-screen Chrome window. */
+  loginMessage: string;
+  /** True while Continue is reading the window after sign-in. */
+  continuing: boolean;
   open: (url: string, opts?: { prefill?: boolean; company?: string; n?: string; from?: string }) => Promise<void>;
   prefill: () => Promise<void>;
   setAnswer: (idOrLabel: string, value: string) => void;
   fill: () => Promise<void>;
   agentFill: () => Promise<void>;
+  continueLogin: () => Promise<void>;
   reset: () => void;
 };
 
@@ -73,6 +78,8 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   const [issues, setIssues] = useState<ApplyIssue[]>([]);
   const [driveSteps, setDriveSteps] = useState<DriveStep[]>([]);
   const [error, setError] = useState("");
+  const [loginMessage, setLoginMessage] = useState("");
+  const [continuing, setContinuing] = useState(false);
   const sessionId = useRef<string | null>(null);
   const companyRef = useRef<string>("");
   // Mirrors `n` for the async fetch below, same reason as companyRef: the
@@ -167,6 +174,8 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setShots([]);
     setIssues([]);
     setDriveSteps([]);
+    setLoginMessage("");
+    setContinuing(false);
     setUrl(u);
     setCompany(opts?.company ?? "");
     companyRef.current = opts?.company ?? "";
@@ -194,6 +203,13 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       setTitle(d.title);
       setShots(d.shots ?? []);
       pendingPrefill.current = !!opts?.prefill;
+      if (d.needsLogin) {
+        // Sign-in wall (Workday…): the window is on screen; the user signs in
+        // there and clicks Continue here. We never handle their credentials.
+        setLoginMessage(d.loginMessage || "Sign in in the Chrome window, then click Continue.");
+        setStatus("login");
+        return;
+      }
       if (d.needsDrive) {
         // The form is behind navigation → the agent drives to reach it, streamed.
         setStatus("driving");
@@ -282,6 +298,52 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       setStatus("ready");
     }
   }, []);
+
+  // After the user signed in on the Chrome window: read the form from wherever
+  // the window is. Fields → ready (auto-prefill fires); still on a sign-in page
+  // → stay in "login" with a hint; not on the form yet → the agent drives there.
+  const continueLogin = useCallback(async () => {
+    if (!sessionId.current) return;
+    const gen = generation.current;
+    const id = sessionId.current;
+    setContinuing(true);
+    setError("");
+    try {
+      const r = await fetch("/api/apply/continue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id }) });
+      const d = await r.json();
+      if (generation.current !== gen) return; // left while reading
+      if (d.error) {
+        setError(d.error);
+        return;
+      }
+      if (d.stillSignedOut) {
+        setError("The window is still on the sign-in page. Finish signing in there, then click Continue again.");
+        return;
+      }
+      if (d.notOnForm) {
+        setError("The window isn't on the application form yet. In Workday: click Apply, choose Apply Manually, sign in, then click Continue here.");
+        return;
+      }
+      if (d.title) setTitle(d.title);
+      if (d.needsDrive) {
+        if (!cliId()) {
+          setError("You're signed in, but the form isn't open yet. Open it in the Chrome window and click Continue, or save Claude Code in Config so the AI can click through for you.");
+          return;
+        }
+        setStatus("driving");
+        await drive(id);
+        return;
+      }
+      setFields(d.fields ?? []);
+      setIssues(d.issues ?? []);
+      setStatus("ready"); // → the ready-effect auto-prefills if pending
+    } catch (e) {
+      if (generation.current !== gen) return;
+      setError(`Couldn't read the form: ${e instanceof Error ? e.message : "network error"}.`);
+    } finally {
+      if (generation.current === gen) setContinuing(false);
+    }
+  }, [drive]);
 
   // Auto-prefill exactly once after the fields are ready.
   useEffect(() => {
@@ -424,11 +486,13 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setIssues([]);
     setDriveSteps([]);
     setError("");
+    setLoginMessage("");
+    setContinuing(false);
   }, []);
 
   const value = useMemo(
-    () => ({ status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, reset }),
-    [status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, reset],
+    () => ({ status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, loginMessage, continuing, open, prefill, setAnswer, fill, agentFill, continueLogin, reset }),
+    [status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, loginMessage, continuing, open, prefill, setAnswer, fill, agentFill, continueLogin, reset],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

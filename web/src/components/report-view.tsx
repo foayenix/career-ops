@@ -1,5 +1,5 @@
-import Link from "next/link";
-import { ArrowLeft, FileText, ExternalLink, ChevronDown } from "lucide-react";
+import { FileText, ExternalLink, ChevronDown } from "lucide-react";
+import { BackLink } from "@/components/back-link";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { scoreTone, legitimacyTone, parseReport } from "@/lib/format";
@@ -61,6 +61,7 @@ export function ReportView({
   canDelete = false,
   pdfReadyFromIndex = false,
   coverReady = false,
+  embedded = false,
 }: {
   id: string;
   app: Application | null;
@@ -74,6 +75,9 @@ export function ReportView({
    *  the page, see resolveTailoredCover). View only — covers are never generated
    *  from here. */
   coverReady?: boolean;
+  /** Rendered inside the Review queue: no back link, no status/delete controls
+   *  (the queue's own action bar owns the decision), no page-level centering. */
+  embedded?: boolean;
 }) {
   const meta = report ? parseReport(report) : null;
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
@@ -91,15 +95,10 @@ export function ReportView({
   const companyName = company?.label ?? app?.company ?? meta?.title ?? id;
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8 xl:max-w-5xl 2xl:max-w-[1600px]">
-      <Link
-        href="/pipeline"
-        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
-      >
-        <ArrowLeft className="size-4" /> Pipeline
-      </Link>
+    <div className={embedded ? "max-w-4xl px-4 py-6 sm:px-8" : "mx-auto max-w-3xl px-6 py-8 xl:max-w-5xl 2xl:max-w-[1600px]"}>
+      {!embedded && <BackLink fallback="/pipeline" />}
 
-      <header className="mt-5">
+      <header className={embedded ? "" : "mt-5"}>
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">#{id}</p>
         <div className="mt-2 flex items-center gap-3">
           <CompanyLogo name={company?.logoName ?? meta?.title ?? `Report #${id}`} size={40} />
@@ -110,7 +109,7 @@ export function ReportView({
         {app?.role && <p className="mt-1 text-muted">{app.role}</p>}
 
         <div className="mt-4 flex flex-wrap items-center gap-2.5">
-          {app && <StatusSelect n={id} current={app.status} />}
+          {app && !embedded && <StatusSelect n={id} current={app.status} />}
           <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={pdfReady} />
           {coverReady && (
             <a
@@ -124,7 +123,7 @@ export function ReportView({
           )}
         </div>
 
-        {app && canDelete && (
+        {app && canDelete && !embedded && (
           <div className="mt-3">
             <DeleteFromTracker n={id} />
           </div>

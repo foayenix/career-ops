@@ -176,7 +176,7 @@ async function nudgeScroll(page: Page): Promise<void> {
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
 }
 
-export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<{ id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean }> {
+export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<{ id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean; needsLogin?: boolean; loginMessage?: string }> {
   prune();
   if (globalThis.__coIdleTimer) clearTimeout(globalThis.__coIdleTimer); // someone's active
   const browser = await headedBrowser();
@@ -270,6 +270,20 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     // Driveable (controls present, not a hard block) + we have an agent → KEEP the
     // session open and hand off to the STREAMED drive route, so the user watches
     // the agent reach the form live (/api/apply/drive). Otherwise abort.
+    // Sign-in first (Workday, or any login wall): keep the session, bring the
+    // window on screen, and let the HUMAN sign in there. We never type their
+    // credentials. The UI waits for "Continue" → continueAfterLogin().
+    if (why.code === "workday" || why.code === "login-wall") {
+      const id = `apply-${crypto.randomUUID()}`;
+      const title = form.title || (await page.title().catch(() => "")) || "Application";
+      SESSIONS.set(id, { id, url, title, fields: [], context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1] });
+      await handoffSession(id).catch(() => {});
+      const loginMessage =
+        why.code === "workday"
+          ? "This is a Workday application. In the Chrome window that just opened: click Apply, choose Apply Manually, then sign in or create your account. When you reach the first form page (My Information), come back and click Continue."
+          : "This site wants you to sign in first. Sign in in the Chrome window that just opened, open the application form, then come back and click Continue.";
+      return { id, title, fields: [], shots, issues: [], needsLogin: true, loginMessage };
+    }
     if (cliId && why.code === "no-form") {
       const id = `apply-${crypto.randomUUID()}`;
       const title = form.title || (await page.title().catch(() => "")) || "Application";
@@ -301,6 +315,41 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   const id = `apply-${crypto.randomUUID()}`;
   SESSIONS.set(id, { id, url, title: form.title, fields: form.fields, context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1] });
   return { id, title: form.title, fields: form.fields, shots, issues };
+}
+
+/** After the human signed in (needsLogin): read wherever their window is now.
+ *  Follows a newly opened tab, refreshes the session's expiry, and reports one of:
+ *  the form's fields (ready to pre-fill), still on a sign-in page, or "not on the
+ *  form yet" (the caller drives there with the agent). Never types credentials. */
+export async function continueAfterLogin(id: string): Promise<{ title: string; fields: ApplyField[]; issues: ApplyIssue[]; at?: string; stillSignedOut?: boolean; notOnForm?: boolean; needsDrive?: boolean }> {
+  const s = SESSIONS.get(id);
+  if (!s) throw new Error("apply session not found (it may have expired). Start again from the job.");
+  s.createdAt = Date.now();
+  // Follow the newest tab that holds a real page (a sign-in can open one); blank
+  // tabs (about:blank) don't count.
+  const pages = s.context.pages().filter((p) => !p.isClosed() && /^https?:/i.test(p.url()));
+  if (!pages.length) throw new Error("The Chrome window was closed. Start again from the job.");
+  s.page = pages[pages.length - 1];
+  await s.page.waitForLoadState("domcontentloaded", { timeout: 8_000 }).catch(() => {});
+  await s.page.waitForTimeout(800);
+  const { frame, form } = await pickFormFrame(s.page);
+  await enrichFromAts(s.page.url(), form.fields);
+  if (looksLikeApplicationForm(form)) {
+    s.frame = frame;
+    s.fields = form.fields;
+    if (form.title) s.title = form.title;
+    const [cap, multi] = await Promise.all([captchaWarning(s.page), multiStepInfo(s.page)]);
+    const issues: ApplyIssue[] = [{ level: "info", code: "signed-in", message: "Signed in — reading the form from your Chrome window. Review every answer before submitting." }];
+    if (cap) issues.push(cap);
+    if (multi) issues.push(multi);
+    return { title: s.title, fields: s.fields, issues, at: s.page.url() };
+  }
+  const passwordShown = await s.page.locator('input[type="password"]').first().isVisible().catch(() => false);
+  if (passwordShown) return { title: s.title, fields: [], issues: [], stillSignedOut: true, at: s.page.url() };
+  // Workday lands on the form right after sign-in; anywhere else on Workday means
+  // the user hasn't got there yet, and an agent would only run into the sign-in.
+  if (/myworkdayjobs\.com$/i.test(new URL(s.page.url()).hostname)) return { title: s.title, fields: [], issues: [], notOnForm: true, at: s.page.url() };
+  return { title: s.title, fields: [], issues: [], needsDrive: true, at: s.page.url() };
 }
 
 export function getSession(id: string): Session | undefined {

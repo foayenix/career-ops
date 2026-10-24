@@ -58,7 +58,7 @@ export function DecisionCard({ app }: { app: Application }) {
         {/* Primary is the report (PDF + Apply live there). Marking Applied from
             Today skipped that path and wrote a status with no application. */}
         <Link
-          href={`/pipeline/${app.n}`}
+          href={`/review?id=${encodeURIComponent(app.n)}`}
           className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand-text transition hover:bg-brand/15 max-sm:min-h-[44px]"
         >
           <FileText className="size-3.5" /> Review

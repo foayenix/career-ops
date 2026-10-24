@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, CircleHelp, Sparkles, ArrowRight } from "lucide-react";
+import { Bell, CircleHelp, Sparkles, ArrowRight, CalendarClock, Hourglass, Star } from "lucide-react";
 import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import type { Application, InboxJob } from "@/lib/career-ops";
@@ -11,9 +11,13 @@ import type { DiscoveredOffer } from "@/lib/explore";
 import { DiscoveryCard } from "@/components/explore/discovery-card";
 import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
 import { DecisionCard } from "@/components/home/decision-card";
+import { AutopilotStatus } from "@/components/home/autopilot-status";
 import { QuickEvaluate } from "@/components/quick-evaluate";
 import { scoreNum } from "@/lib/format";
 import { pickAwaitingDecision } from "@/lib/home/awaiting.mjs";
+import type { DeadlineRow } from "@/lib/home/deadlines.mjs";
+import { DeadlineBoard } from "@/components/home/deadline-board";
+import { cn } from "@/lib/cn";
 
 // The retention "Today": a dual-loop action queue (the maintainer's
 // "N new matches this week · M follow-ups due"). SUPPLY loop = fresh free-scan
@@ -22,12 +26,20 @@ import { pickAwaitingDecision } from "@/lib/home/awaiting.mjs";
 // canonical files — every action dispatches a real registry action / route.
 export function TodayDashboard({
   applications,
+  trackedCount,
   inbox,
   inBetween,
+  deadlines = [],
+  today,
 }: {
   applications: Application[];
+  trackedCount: number;
   inbox: Pick<InboxJob, "url" | "done">[];
   inBetween: boolean;
+  /** Undecided roles with their posting timeline, soonest-closing first. */
+  deadlines?: DeadlineRow[];
+  /** The server's local YYYY-MM-DD, so the calendar and the dates agree. */
+  today?: string;
 }) {
   const [followups, setFollowups] = useState<FollowUp[]>([]);
   const [overdue, setOverdue] = useState(0);
@@ -80,7 +92,10 @@ export function TodayDashboard({
   const awaiting = useMemo(() => pickAwaitingDecision(applications, scoreNum), [applications]);
 
   const newThisWeek = freshCount;
-  const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
+  const closingSoon = deadlines.filter((d) => ["today", "soon", "week"].includes(d.deadline.urgency)).length;
+  const closingToday = deadlines.filter((d) => d.deadline.urgency === "today").length;
+  const strongOpen = deadlines.filter((d) => d.deadline.urgency !== "closed" && scoreNum(d.score) >= 4).length;
+  const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0 && closingSoon === 0;
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
 
   return (
@@ -97,23 +112,39 @@ export function TodayDashboard({
             {allClear ? (
               <>You&apos;re all caught up.</>
             ) : (
-              <>
-                {newThisWeek > 0 && (
-                  <>
-                    <span className="text-brand tabular-nums">{newThisWeek}</span> new match{newThisWeek === 1 ? "" : "es"} this week
-                  </>
-                )}
-                {newThisWeek > 0 && overdue > 0 && <span className="text-faint"> · </span>}
-                {overdue > 0 && (
-                  <>
+              [
+                closingSoon > 0 && (
+                  <span key="closing">
+                    <span className="text-brand tabular-nums">{closingSoon}</span> closing this week
+                  </span>
+                ),
+                newThisWeek > 0 && (
+                  <span key="new">
+                    <span className="text-brand tabular-nums">{newThisWeek}</span> new match{newThisWeek === 1 ? "" : "es"}
+                  </span>
+                ),
+                overdue > 0 && (
+                  <span key="due">
                     <span className="text-brand tabular-nums">{overdue}</span> follow-up{overdue === 1 ? "" : "s"} due
-                  </>
-                )}
-              </>
+                  </span>
+                ),
+                // Only undecided roles left — say so, rather than an empty headline.
+                closingSoon === 0 && newThisWeek === 0 && overdue === 0 && awaiting.length > 0 && (
+                  <span key="awaiting">
+                    <span className="text-brand tabular-nums">{applications.length}</span> role{applications.length === 1 ? "" : "s"} to decide on
+                  </span>
+                ),
+              ]
+                .filter(Boolean)
+                .flatMap((el, i) => (i === 0 ? [el] : [<span key={`sep-${i}`} className="text-faint"> · </span>, el]))
             )}
           </h1>
           <p className="mt-4 max-w-xl text-sm text-muted">
-            {allClear ? "I'll keep scanning the market in the background and surface anything that fits." : "Your action queue for today — discovery and follow-ups, in one place."}
+            {allClear
+              ? "I'll keep scanning the market in the background and surface anything that fits."
+              : closingToday > 0
+                ? `${closingToday} application${closingToday === 1 ? " closes" : "s close"} today — start there.`
+                : "Your action queue for today — deadlines, discovery and follow-ups, in one place."}
           </p>
           <div className="mt-6 flex flex-wrap gap-2.5">
             <Link href="/explore" className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground transition hover:bg-brand-200 max-sm:min-h-[44px]">
@@ -123,9 +154,27 @@ export function TodayDashboard({
               Open pipeline
             </Link>
           </div>
-          {inBetween && <QuickEvaluate />}
+          {/* Paste any job link → full evaluation (report + score + tracker row). */}
+          <QuickEvaluate />
         </div>
       </section>
+
+      {/* At-a-glance numbers. Each tile jumps to the section that acts on it. */}
+      <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi href="#deadlines" icon={CalendarClock} value={closingSoon} label="closing this week" tone={closingSoon > 0 ? "alert" : "calm"} />
+        <Kpi href="/review" icon={CircleHelp} value={applications.length} label="to decide" />
+        <Kpi href="#decide" icon={Star} value={strongOpen} label="strong fits 4.0+" tone={strongOpen > 0 ? "good" : "calm"} />
+        <Kpi href="/followups" icon={Hourglass} value={overdue} label="follow-ups due" tone={overdue > 0 ? "alert" : "calm"} />
+      </div>
+
+      <AutopilotStatus />
+
+      {/* 0. Deadlines — what closes first, and what has no fixed date */}
+      {deadlines.length > 0 && today && (
+        <Section id="deadlines" icon={CalendarClock} title="Deadlines" hint="Apply before these close">
+          <DeadlineBoard rows={deadlines} today={today} />
+        </Section>
+      )}
 
       {/* A. Follow-ups due (demand loop) */}
       {followups.length > 0 ? (
@@ -155,12 +204,17 @@ export function TodayDashboard({
 
       {/* B. Awaiting your decision */}
       {awaiting.length > 0 && (
-        <Section icon={CircleHelp} title="Awaiting your decision" hint="Scored — apply or skip">
+        <Section id="decide" icon={CircleHelp} title="Awaiting your decision" hint="Scored — apply or skip">
           <div className="grid gap-2.5 sm:grid-cols-2">
             {awaiting.map((a) => (
               <DecisionCard key={a.n} app={a} />
             ))}
           </div>
+          {applications.length > awaiting.length && (
+            <Link href="/review" className="mt-3 inline-flex items-center text-sm text-muted transition hover:text-brand max-sm:min-h-[44px]">
+              Review all {applications.length} →
+            </Link>
+          )}
         </Section>
       )}
 
@@ -192,9 +246,43 @@ export function TodayDashboard({
   );
 }
 
-function Section({ icon: Icon, title, hint, children }: { icon: React.ComponentType<{ className?: string }>; title: string; hint: string; children: React.ReactNode }) {
+function Kpi({
+  href,
+  icon: Icon,
+  value,
+  label,
+  tone = "calm",
+}: {
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  value: number;
+  label: string;
+  tone?: "calm" | "alert" | "good";
+}) {
   return (
-    <section className="mt-10">
+    <Link
+      href={href}
+      className="group flex items-center gap-3 rounded-xl border border-border bg-surface/40 px-3.5 py-3 transition hover:border-brand/40 hover:bg-surface-hover"
+    >
+      <span
+        className={cn(
+          "grid size-9 shrink-0 place-items-center rounded-lg",
+          tone === "alert" ? "bg-red-500/10 text-red-600 dark:text-red-400" : tone === "good" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-surface-hover text-muted",
+        )}
+      >
+        <Icon className="size-4" />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-2xl font-semibold leading-none tabular-nums text-foreground">{value}</span>
+        <span className="mt-1 block text-xs leading-tight text-muted">{label}</span>
+      </span>
+    </Link>
+  );
+}
+
+function Section({ id, icon: Icon, title, hint, children }: { id?: string; icon: React.ComponentType<{ className?: string }>; title: string; hint: string; children: React.ReactNode }) {
+  return (
+    <section id={id} className="mt-10 scroll-mt-8">
       <div className="mb-3 flex items-center gap-2">
         <Icon className="size-4 text-brand" />
         <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted">{title}</h2>

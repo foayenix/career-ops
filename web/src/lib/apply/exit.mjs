@@ -6,7 +6,7 @@
 export const DEFAULT_RETURN_PATH = "/pipeline";
 
 /** Statuses where a step is running that leaving would interrupt. */
-const IN_FLIGHT = new Set(["opening", "driving", "prefilling", "filling"]);
+const IN_FLIGHT = new Set(["opening", "login", "driving", "prefilling", "filling"]);
 
 /**
  * Should leaving the Apply page ask first?

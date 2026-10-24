@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Wand2, Asterisk, Paperclip, Sparkles, ArrowUpRight, ShieldCheck, RotateCcw, FileCheck2, AlertTriangle, Terminal, Check, ScanLine, PenLine, CheckCircle2, Info, ExternalLink, MousePointerClick, ArrowLeft, ClipboardCheck } from "lucide-react";
+import { Loader2, Wand2, Asterisk, Paperclip, Sparkles, ArrowUpRight, ShieldCheck, RotateCcw, FileCheck2, AlertTriangle, Terminal, Check, ScanLine, PenLine, CheckCircle2, Info, ExternalLink, MousePointerClick, ArrowLeft, ClipboardCheck, LogIn } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { useApply } from "@/components/apply/apply-provider";
@@ -78,7 +78,8 @@ export function ApplyView() {
   const prefilling = a.status === "prefilling";
   const filling = a.status === "filling";
   const done = a.status === "done";
-  const busy = opening || driving;
+  const login = a.status === "login";
+  const busy = opening || driving || login;
   const phase = busy ? 0 : prefilling ? 1 : 2;
 
   return (
@@ -104,6 +105,9 @@ export function ApplyView() {
           <FieldSkeleton />
         </>
       )}
+
+      {/* sign-in wall: the user signs in on the on-screen Chrome window, then continues here */}
+      {login && <LoginPanel />}
 
       {/* driving: watch the agent reach the form live (it navigates, never submits) */}
       {driving && <DrivePanel steps={a.driveSteps} />}
@@ -364,6 +368,43 @@ function ApplyExitBar() {
 
 // ── Watch the agent reach the form live (it navigates, never submits) ───────
 const DRIVE_VERB: Record<string, string> = { click: "Clicked", type: "Typed into", select: "Selected", scroll: "Scrolled", "parse-error": "Thinking…", stuck: "Stuck", reached_form: "Reached the form" };
+// The application sits behind a sign-in (Workday and similar). The real Chrome
+// window is on screen; the user signs in THERE (career-ops never sees or types
+// their password), then clicks Continue and the normal read → draft → fill flow
+// picks up from wherever that window is.
+function LoginPanel() {
+  const a = useApply();
+  return (
+    <div className="co-rise mb-4 rounded-2xl border border-brand/30 bg-brand-soft/50 p-5 backdrop-blur-sm">
+      <div className="flex items-start gap-3">
+        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-brand/15">
+          <LogIn className="size-4 text-brand" />
+        </span>
+        <div className="min-w-0">
+          <h2 className="text-base font-medium text-foreground">{a.title || "Sign in to continue"}</h2>
+          <p className="mt-1 text-sm text-muted">{a.loginMessage}</p>
+          <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted">
+            <ShieldCheck className="size-3.5 text-emerald-500" /> You type your password in that window yourself. career-ops never sees it, and never submits.
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          onClick={a.continueLogin}
+          disabled={a.continuing}
+          className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-lg shadow-brand/25 transition-all hover:bg-brand-200 disabled:opacity-50"
+        >
+          {a.continuing ? <Loader2 className="size-4 animate-spin" /> : <ArrowUpRight className="size-4" />}
+          {a.continuing ? "Reading the form…" : "I've signed in — Continue"}
+        </button>
+        <button onClick={a.reset} className="inline-flex items-center gap-1 text-xs text-faint transition-colors hover:text-foreground">
+          <RotateCcw className="size-3" /> cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DrivePanel({ steps, filling }: { steps: DriveStep[]; filling?: boolean }) {
   const last = steps[steps.length - 1];
   return (

@@ -11,6 +11,7 @@ import { WorkerPills } from "@/components/jobs/worker-pills";
 import { UsageMeter } from "@/components/usage-meter";
 import { instrumentSerif } from "@/lib/fonts";
 import { NAV_ITEMS, isActivePath } from "@/lib/nav-items";
+import { ReviewNavCount } from "@/components/review/review-nav-count";
 import { useJobs } from "@/components/jobs/job-store";
 
 // Mobile navigation (< md): a glass top bar + a right-side slide-over drawer that
@@ -105,9 +106,9 @@ export function MobileNav() {
       <style>{STYLE}</style>
 
       <header className="co-mnav flex items-center gap-2 border-b border-border px-4 pb-3 md:hidden">
-        <Link href="/" className="flex min-h-[44px] items-center gap-2" aria-label="career-ops home">
+        <Link href="/" className="flex min-h-[44px] items-center gap-2" aria-label="felixjobs home">
           <CoMark size={26} />
-          <span className={`${instrumentSerif.className} relative -top-px text-xl text-landing`}>career-ops</span>
+          <span className={`${instrumentSerif.className} relative -top-px text-xl text-landing`}>felixjobs</span>
         </Link>
         <div className="ml-auto flex items-center gap-0.5">
           <ThemeToggle />
@@ -150,7 +151,7 @@ export function MobileNav() {
         </div>
 
         <nav className="flex flex-col gap-1 px-3">
-          {NAV_ITEMS.map(({ href, label, icon: Icon, chip }) => {
+          {NAV_ITEMS.map(({ href, label, icon: Icon, chip, count }) => {
             const active = isActivePath(href, pathname);
             return (
               <Link
@@ -165,6 +166,7 @@ export function MobileNav() {
               >
                 <Icon className="size-5" />
                 {label}
+                {count === "review" && <ReviewNavCount />}
                 {chip && (
                   <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-text">
                     {chip}

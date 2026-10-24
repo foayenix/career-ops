@@ -6,11 +6,11 @@ import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "career-ops — official web experience",
-  description: "The official, local-first web experience for career-ops.",
+  title: "felixjobs",
+  description: "Felix's job search — local-first, served over Tailscale.",
   // Home-screen / standalone (iOS): let our theme-color flow up to the status bar
   // + Dynamic Island; safe-area insets handle the layout.
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "career-ops" },
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "felixjobs" },
 };
 
 export const viewport: Viewport = {

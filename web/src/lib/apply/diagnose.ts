@@ -1,6 +1,7 @@
 import type { Page, Frame } from "playwright-core";
 import type { ApplyField } from "./extract";
 import type { ApplyIssue } from "./issue";
+import { pickApplyHref } from "./apply-link.mjs";
 
 export type { ApplyIssue };
 
@@ -90,15 +91,23 @@ export async function dropNewTabs(page: Page): Promise<void> {
  *  NAVIGATE there directly (robust vs popups). Returns true if it acted. */
 export async function tryApplyTrigger(page: Page): Promise<boolean> {
   try {
-    // 1) Most reliable: an <a> linking straight to a known ATS application (e.g.
-    //    openai.com → jobs.ashbyhq.com/…/application). Navigate there in-tab.
-    const atsLink = page.locator('a[href*="ashbyhq"], a[href*="greenhouse"], a[href*="lever.co"], a[href*="smartrecruiters"], a[href*="workable"], a[href*="recruitee"], a[href*="bamboohr"], a[href*="jobvite"], a[href*="teamtailor"], a[href*="myworkdayjobs"], a[href*="/apply"], a[href*="/application"]').first();
-    if (await atsLink.count().catch(() => 0)) {
-      const href = await atsLink.getAttribute("href").catch(() => null);
-      if (href && /^https?:\/\//i.test(href) && !/submit/i.test(href)) {
-        await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
-        return true;
-      }
+    // 1) Most reliable: a link to the application itself (e.g. Lever's APPLY →
+    //    …/apply, or openai.com → jobs.ashbyhq.com/…/application). Navigate there
+    //    in-tab. pickApplyHref ranks the candidates; see apply-link.mjs for why
+    //    "first link mentioning the ATS" went to logos and sign-in pages.
+    const anchors = await page
+      .evaluate(() =>
+        Array.from(document.querySelectorAll("a[href]")).map((a) => ({
+          href: (a as HTMLAnchorElement).href,
+          text: ((a as HTMLElement).innerText || a.getAttribute("aria-label") || "").slice(0, 80),
+          visible: (a as HTMLElement).offsetParent !== null,
+        })),
+      )
+      .catch(() => []);
+    const href = pickApplyHref(anchors, page.url());
+    if (href) {
+      await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
+      return true;
     }
     // 2) Otherwise click a visible Apply CTA (never a submit). dropNewTabs() has
     //    already neutralised target=_blank / window.open so it stays in-tab.

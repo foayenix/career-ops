@@ -1,8 +1,11 @@
 import Link from "next/link";
-import { pipelineSummary, readApplicationStatusLog, readStatusLog } from "@/lib/career-ops";
+import { Lightbulb, AlertTriangle, TrendingUp } from "lucide-react";
+import { pipelineSummary, readApplicationStatusLog, readReport, readStatusLog } from "@/lib/career-ops";
 import { PipelineSankey } from "@/components/analytics/pipeline-sankey";
 import { canonStatus, scoreNum } from "@/lib/format";
 import { cumulativeTilesWithHistory } from "@/lib/funnel-tiles.mjs";
+import { conversion, insights, medianDaysToCatch, skipReasons, trackBreakdown, weeklyActivity } from "@/lib/analytics-insights.mjs";
+import { buildDeadlineQueue, extractPostingTimeline, localIsoDate } from "@/lib/home/deadlines.mjs";
 
 export const dynamic = "force-dynamic";
 
@@ -53,10 +56,52 @@ export default async function Analytics() {
     readApplicationStatusLog(),
   );
 
+  // Derived insight — every number below comes from analytics-insights.mjs,
+  // which the test suite exercises directly.
+  const today = localIsoDate();
+  const conv = conversion(applications, scoreNum);
+  const tracks = trackBreakdown(applications, scoreNum);
+  const reasons = skipReasons(applications);
+  const maxReason = Math.max(1, ...reasons.map((r) => r.count));
+  const weeks = weeklyActivity(applications, today, 8);
+  const maxWeek = Math.max(1, ...weeks.map((w) => w.count));
+  const thisWeek = weeks.at(-1)?.count ?? 0;
+  const reports = new Map(applications.map((a) => [a.n, readReport(a.n)?.content]));
+  const catchDays = medianDaysToCatch(applications.map((a) => ({ posted: extractPostingTimeline(a, reports.get(a.n)).posted, evaluated: a.date })));
+  const closingSoon = buildDeadlineQueue(applications, (n) => reports.get(n), today, scoreNum).filter((d) =>
+    ["today", "soon", "week"].includes(d.deadline.urgency),
+  ).length;
+  const takeaways = insights({ conv, tracks, reasons, catchDays, closingSoon });
+
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
       <h1 className="font-display text-2xl tracking-tight text-landing">Analytics</h1>
-      <p className="mt-1 text-sm text-muted">Across {total} tracked evaluation{total === 1 ? "" : "s"}.</p>
+      <p className="mt-1 text-sm text-muted">
+        Across {total} tracked evaluation{total === 1 ? "" : "s"} · <span className="tabular-nums">{thisWeek}</span> this week.
+      </p>
+
+      {/* What the data says — plain-language, most actionable first */}
+      {takeaways.length > 0 && (
+        <section className="mt-6 rounded-2xl border border-border bg-surface/40 p-5">
+          <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted">
+            <Lightbulb className="size-4 text-brand" /> What your data says
+          </h2>
+          <ul className="mt-3 space-y-2">
+            {takeaways.map((t) => (
+              <li key={t.text} className="flex items-start gap-2.5 text-sm text-foreground">
+                {t.tone === "action" ? (
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-label="Action" />
+                ) : t.tone === "good" ? (
+                  <TrendingUp className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-label="Strength" />
+                ) : (
+                  <span className="mt-2 size-1.5 shrink-0 rounded-full bg-foreground/30" aria-hidden />
+                )}
+                <span>{t.text}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* headline stats */}
       <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -74,7 +119,78 @@ export default async function Analytics() {
         />
       </div>
 
+      {/* conversion rates — the funnel as ratios */}
+      <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <Stat value={conv.strongShare === null ? "—" : `${conv.strongShare}%`} label={`strong fits (4.0+) · ${conv.strong}`} />
+        <Stat value={conv.applyRate === null ? "—" : `${conv.applyRate}%`} label={`applied · ${conv.applied} of ${conv.total}`} />
+        <Stat value={conv.responseRate === null ? "—" : `${conv.responseRate}%`} label="response rate" />
+        <Stat value={catchDays === null ? "—" : `${catchDays}d`} label="median posting → evaluation" />
+      </div>
+
+      <Section title="Activity · evaluations per week">
+        <div className="flex h-36 items-end gap-1.5 rounded-xl border border-border bg-surface/30 px-3 pb-2 pt-4" role="img" aria-label="Evaluations per week, last 8 weeks">
+          {weeks.map((w, i) => (
+            <div key={w.start} className="group flex h-full flex-1 flex-col items-center justify-end gap-1" title={`Week of ${w.start}: ${w.count} evaluated`}>
+              <span className={`text-[11px] tabular-nums text-muted ${w.count ? "" : "opacity-0"}`}>{w.count}</span>
+              <div
+                className={`w-full max-w-10 rounded-t ${i === weeks.length - 1 ? "bg-brand" : "bg-brand/45"} transition group-hover:bg-brand`}
+                style={{ height: `${w.count ? Math.max(4, (w.count / maxWeek) * 100) : 0}%` }}
+              />
+              <span className="text-[10px] tabular-nums text-faint">
+                {new Date(`${w.start}T12:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+              </span>
+            </div>
+          ))}
+        </div>
+      </Section>
+
       <PipelineSankey applications={applications} statusLog={statusLog} />
+
+      <Section title="How your target tracks perform">
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full min-w-[520px] text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs text-faint">
+                <th className="px-3 py-2 font-medium">Track</th>
+                <th className="px-3 py-2 text-right font-medium">Roles</th>
+                <th className="px-3 py-2 font-medium">Avg score</th>
+                <th className="px-3 py-2 text-right font-medium">4.0+</th>
+                <th className="px-3 py-2 text-right font-medium">Open</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tracks.map((t) => (
+                <tr key={t.track} className="border-b border-border/60 last:border-0">
+                  <td className="px-3 py-2.5 text-foreground">{t.track}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-muted">{t.count}</td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-2" title={t.avg === null ? "No scores" : `Average ${t.avg.toFixed(2)} / 5`}>
+                      <div className="h-1.5 w-28 overflow-hidden rounded-full bg-surface-hover">
+                        <div
+                          className={`h-full rounded-full ${t.avg !== null && t.avg >= 4 ? "bg-emerald-500" : t.avg !== null && t.avg >= 3 ? "bg-brand/70" : "bg-foreground/30"}`}
+                          style={{ width: `${((t.avg ?? 0) / 5) * 100}%` }}
+                        />
+                      </div>
+                      <span className="tabular-nums text-muted">{t.avg === null ? "—" : t.avg.toFixed(1)}</span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-foreground">{t.strong}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-muted">{t.open}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      {reasons.length > 0 && (
+        <Section title="Why roles get skipped">
+          {reasons.map((r) => (
+            <Bar key={r.key} label={r.label} value={r.count} pct={(r.count / maxReason) * 100} total={conv.skipped} wide />
+          ))}
+          <p className="text-xs text-faint">Read from the evaluator&apos;s notes on Skipped and Discarded roles; each role counts once, under its hardest blocker.</p>
+        </Section>
+      )}
 
       <Section title="Pipeline by stage">
         {stageCounts.map((s) => (
@@ -133,12 +249,15 @@ function Bar({
   pct,
   total,
   tone = "neutral",
+  wide = false,
 }: {
   label: string;
   value: number;
   pct: number;
   total?: number;
   tone?: "neutral" | "positive";
+  /** Longer labels (reasons) get more room before truncating. */
+  wide?: boolean;
 }) {
   const share = total && total > 0 ? Math.round((value / total) * 100) : null;
   const fill =
@@ -146,8 +265,8 @@ function Bar({
       ? "bg-gradient-to-r from-emerald-500/60 to-emerald-500/30"
       : "bg-gradient-to-r from-foreground/25 to-foreground/10";
   return (
-    <div className="flex items-center gap-3">
-      <div className="w-32 shrink-0 truncate text-sm text-muted">{label}</div>
+    <div className="flex items-center gap-3" title={`${label}: ${value}`}>
+      <div className={`${wide ? "w-32 sm:w-52" : "w-32"} shrink-0 truncate text-sm text-muted`}>{label}</div>
       <div className="relative h-7 flex-1 overflow-hidden rounded-md bg-surface">
         <div
           className={`h-full rounded-md ${fill}`}

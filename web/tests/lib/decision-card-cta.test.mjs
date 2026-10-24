@@ -9,8 +9,8 @@ const src = readFileSync(
   "utf8",
 );
 
-test("Today primary action opens the report, not Mark applied", () => {
-  const primary = src.indexOf('href={`/pipeline/${app.n}`}');
+test("Today primary action opens the report in the Review queue, not Mark applied", () => {
+  const primary = src.indexOf("href={`/review?id=${encodeURIComponent(app.n)}`}");
   const mark = src.indexOf('setStatus("Applied")');
   assert.notEqual(primary, -1);
   assert.notEqual(mark, -1);

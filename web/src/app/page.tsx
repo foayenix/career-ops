@@ -1,5 +1,6 @@
-import { readApplications, readInbox, doctorState } from "@/lib/career-ops";
+import { readApplications, readInbox, readReport, doctorState } from "@/lib/career-ops";
 import { todaySnapshot } from "@/lib/home/today-snapshot.mjs";
+import { buildDeadlineQueue, localIsoDate } from "@/lib/home/deadlines.mjs";
 import { scoreNum } from "@/lib/format";
 import { OnboardingBanner } from "@/components/onboarding-banner";
 import { FirstRunHome } from "@/components/home/first-run-home";
@@ -15,13 +16,25 @@ export default function Home() {
   if (phase === "first-run") return <FirstRunHome />;
 
   const { inbox, applications } = todaySnapshot(snapshot, scoreNum);
+  // Posting timeline (posted / closes / rolling) for every undecided role, read
+  // from the tracker notes and each report's archived JD. Server-side: reports
+  // are local files, and only the computed dates cross to the client.
+  const today = localIsoDate();
+  const deadlines = buildDeadlineQueue(snapshot.applications, (n) => readReport(n)?.content, today, scoreNum);
   // Established / in-between: the dual-loop retention dashboard. Show the setup
   // banner whenever ANY prereq is missing (mirrors the core doctor.mjs), so a
   // portals-missing user is nudged rather than told "all caught up".
   return (
     <>
       {onboardingNeeded && <OnboardingBanner />}
-      <TodayDashboard applications={applications} inbox={inbox} inBetween={phase === "in-between"} />
+      <TodayDashboard
+        applications={applications}
+        trackedCount={snapshot.applications.length}
+        inbox={inbox}
+        inBetween={phase === "in-between"}
+        deadlines={deadlines}
+        today={today}
+      />
     </>
   );
 }
